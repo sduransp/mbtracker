@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+/**
+ * MBTracker Server
+ *
+ * Express API + static web server with SQLite storage (better-sqlite3).
+ * Local-only by default (binds to 127.0.0.1). See README.server.md.
+ */
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -53,16 +59,18 @@ migrate();
 // Seed defaults if empty
 const count = db.prepare('SELECT COUNT(*) as c FROM houses').get().c;
 if (!count) {
-  db.prepare('INSERT INTO houses(name, country, notes, active) VALUES(?,?,?,?)').run('Retabet', 'ES', 'Casa principal', 1);
-  db.prepare('INSERT INTO houses(name, country, notes, active) VALUES(?,?,?,?)').run('Betfair', 'EU', 'Exchange 2% comisión', 1);
+  db.prepare('INSERT INTO houses(name, country, notes, active) VALUES(?,?,?,?)').run('Retabet', 'ES', 'Main house', 1);
+  db.prepare('INSERT INTO houses(name, country, notes, active) VALUES(?,?,?,?)').run('Betfair', 'EU', 'Exchange 2% commission', 1);
 }
 
 // API routes
+// GET /api/houses — list houses
 app.get('/api/houses', (req, res) => {
   const rows = db.prepare('SELECT * FROM houses ORDER BY active DESC, name ASC').all();
   res.json(rows);
 });
 
+// POST /api/houses — create house
 app.post('/api/houses', (req, res) => {
   const { name, country, notes, active = 1 } = req.body;
   try {
@@ -73,6 +81,7 @@ app.post('/api/houses', (req, res) => {
   }
 });
 
+// PUT /api/houses/:id — update house fields
 app.put('/api/houses/:id', (req, res) => {
   const { id } = req.params;
   const { name, country, notes, active } = req.body;
@@ -84,6 +93,7 @@ app.put('/api/houses/:id', (req, res) => {
   }
 });
 
+// GET /api/entries — list entries (filters: house_id, from, to)
 app.get('/api/entries', (req, res) => {
   const { house_id, from, to } = req.query;
   let sql = 'SELECT * FROM entries WHERE 1=1';
@@ -96,6 +106,7 @@ app.get('/api/entries', (req, res) => {
   res.json(rows);
 });
 
+// POST /api/entries — create entry
 app.post('/api/entries', (req, res) => {
   const { house_id, kind, amount, currency = 'EUR', ts = Date.now(), ref, notes } = req.body;
   try {
@@ -106,6 +117,7 @@ app.post('/api/entries', (req, res) => {
   }
 });
 
+// GET /api/analytics/house/:id — per-house balance + 30-day totals
 app.get('/api/analytics/house/:id', (req, res) => {
   const { id } = req.params;
   const bal = db.prepare('SELECT * FROM v_house_balances WHERE house_id = ?').get(id);
@@ -113,6 +125,7 @@ app.get('/api/analytics/house/:id', (req, res) => {
   res.json({ balance: bal, last30 });
 });
 
+// GET /api/analytics/summary — balances for all houses + totals
 app.get('/api/analytics/summary', (req, res) => {
   const rows = db.prepare('SELECT * FROM v_house_balances').all();
   const total = rows.reduce((acc, r) => ({
