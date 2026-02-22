@@ -21,6 +21,12 @@ async function load() {
   rerender()
 }
 
+async function loadMonthly(){
+  try {
+    state.monthly = await api('/api/analytics/monthly')
+  } catch {}
+}
+
 function HouseList() {
   return h('div', { class: 'panel' }, [
     h('h2', {}, 'Houses'),
@@ -47,7 +53,17 @@ async function onAddHouse(e){
 
 function Dashboard(){
   const rows = state.summary?.rows || []
-  return h('div', { class:'grid' }, rows.map(r => CardHouse(r)))
+  const exposure = state.summary?.exposure || { total_liability: 0, open_bets: 0 }
+  return h('div', { class:'grid' }, [
+    h('div', { class:'card' }, [
+      h('h3', {}, 'Exposure'),
+      h('div', { class:'metrics' }, [
+        h('div', {}, ['Open bets: ', exposure.open_bets||0]),
+        h('div', {}, ['Total liability: ', formatEUR(exposure.total_liability||0)])
+      ])
+    ]),
+    ...rows.map(r => CardHouse(r))
+  ])
 }
 
 function CardHouse(r){
@@ -95,18 +111,70 @@ function App(){
       h('nav', {}, [
         h('button', { class: state.tab==='dashboard'?'sel':'', onclick:()=>{state.tab='dashboard'; rerender()} }, 'Dashboard'),
         h('button', { class: state.tab==='entries'?'sel':'', onclick:()=>{state.tab='entries'; rerender()} }, 'Entries'),
+        h('button', { class: state.tab==='bets'?'sel':'', onclick:()=>{state.tab='bets'; rerender()} }, 'Bets'),
         h('button', { class: state.tab==='houses'?'sel':'', onclick:()=>{state.tab='houses'; rerender()} }, 'Houses')
       ])
     ]),
     state.error && h('div', { class:'panel', style:'border-color:#8b2635;color:#f5c6cb' }, state.error),
     state.tab==='dashboard' && Dashboard(),
     state.tab==='entries' && EntryForm(),
+    state.tab==='bets' && BetsForm(),
     state.tab==='houses' && HouseList(),
+    state.monthly && h('div', { class:'panel' }, [
+      h('h2', {}, 'This month'),
+      h('div', {}, [`Invested: ${formatEUR(state.monthly.invested||0)} · Generated: ${formatEUR(state.monthly.generated||0)} · ROI: ${state.monthly.roi!=null?(state.monthly.roi*100).toFixed(1)+'%':'—'} · Settled bets: ${state.monthly.bets_settled}`])
+    ])
   ])
+}
+
+function BetsForm(){
+  return h('form', { class:'entry', onsubmit: onAddBet }, [
+    h('h2', {}, 'New Bet'),
+    h('select', { name: 'house_id', required: true }, state.houses.map(hs=> h('option', { value: hs.id, selected: hs.id===state.selectedHouse }, hs.name))),
+    h('input', { name: 'event', placeholder:'Event', required: true }),
+    h('input', { name: 'league', placeholder:'League' }),
+    h('input', { name: 'market', placeholder:'Market (e.g., O/U 2.5, BTTS)', required: true }),
+    h('input', { name: 'selection', placeholder:'Selection', required: true }),
+    h('input', { name: 'odds_back', type:'number', step:'0.01', placeholder:'Odds back', required: true }),
+    h('input', { name: 'stake_back', type:'number', step:'0.01', placeholder:'Stake back', required: true }),
+    h('input', { name: 'odds_lay', type:'number', step:'0.01', placeholder:'Odds lay' }),
+    h('input', { name: 'stake_lay', type:'number', step:'0.01', placeholder:'Stake lay' }),
+    h('input', { name: 'commission', type:'number', step:'0.001', placeholder:'Commission (e.g., 0.02)' }),
+    h('input', { name: 'promo_ref', placeholder:'Promo/ref' }),
+    h('label', {}, [
+      h('input', { name:'is_freebet', type:'checkbox' }), ' Freebet'
+    ]),
+    h('input', { name:'freebet_value', type:'number', step:'0.01', placeholder:'Freebet value' }),
+    h('button', { type:'submit' }, 'Save bet')
+  ])
+}
+
+async function onAddBet(e){
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  const b = Object.fromEntries(fd.entries())
+  b.house_id = Number(b.house_id)
+  b.odds_back = parseFloat(b.odds_back)
+  b.stake_back = parseFloat(b.stake_back)
+  if (b.odds_lay) b.odds_lay = parseFloat(b.odds_lay)
+  if (b.stake_lay) b.stake_lay = parseFloat(b.stake_lay)
+  if (b.commission) b.commission = parseFloat(b.commission)
+  b.is_freebet = fd.get('is_freebet') ? true : false
+  if (b.freebet_value) b.freebet_value = parseFloat(b.freebet_value)
+  await api('/api/bets', { method:'POST', body: b })
+  state.summary = await api('/api/analytics/summary')
+  await loadMonthly()
+  e.target.reset()
+  rerender()
 }
 
 function rerender(){
   render(App(), document.getElementById('app'))
 }
 
-load()
+async function boot(){
+  await load()
+  await loadMonthly()
+}
+
+boot()
