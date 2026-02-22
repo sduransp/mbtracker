@@ -88,6 +88,11 @@ const migrate = () => {
     CREATE VIEW IF NOT EXISTS v_exposure AS
       SELECT COALESCE(SUM(liability),0) AS total_liability, COUNT(*) AS open_bets
       FROM bets WHERE status='open';
+
+    CREATE VIEW IF NOT EXISTS v_house_exposure AS
+      SELECT house_id, COALESCE(SUM(liability),0) AS total_liability, COUNT(*) AS open_bets
+      FROM bets WHERE status='open'
+      GROUP BY house_id;
   `);
 };
 
@@ -228,7 +233,8 @@ app.get('/api/analytics/summary', (req, res) => {
     gross_flow: acc.gross_flow + (r.gross_flow || 0)
   }), { net_cash:0, net_pnl:0, net_fees:0, gross_flow:0 });
   const exposure = db.prepare('SELECT * FROM v_exposure').get();
-  res.json({ rows, total, exposure });
+  const houseExposure = db.prepare('SELECT * FROM v_house_exposure').all();
+  res.json({ rows, total, exposure, houseExposure });
 });
 
 // Monthly KPI: invested (deposits - withdrawals), generated (net PnL), ROI
@@ -242,14 +248,20 @@ app.get('/api/analytics/monthly', (req, res) => {
     FROM entries WHERE ts BETWEEN ? AND ?
   `).get(from, to);
   const pnl = db.prepare(`
-    SELECT SUM(CASE WHEN result='win' THEN pnl_net WHEN result='lose' THEN pnl_net ELSE 0 END) AS generated
+    SELECT SUM(pnl_net) AS generated, COUNT(*) AS settled
     FROM bets WHERE status='settled' AND ts_settled BETWEEN ? AND ?
   `).get(from, to);
   const invested = cash.invested || 0;
   const generated = pnl.generated || 0;
   const roi = invested ? (generated / invested) : null;
-  const count = db.prepare(`SELECT COUNT(*) AS n FROM bets WHERE status='settled' AND ts_settled BETWEEN ? AND ?`).get(from, to).n;
-  res.json({ month: now.toISOString().slice(0,7), invested, generated, roi, bets_settled: count });
+  const count = pnl.settled || 0;
+  // Market breakdown
+  const markets = db.prepare(`
+    SELECT market, COUNT(*) AS n, SUM(pnl_net) AS pnl, AVG(ev_est) AS ev
+    FROM bets WHERE status='settled' AND ts_settled BETWEEN ? AND ?
+    GROUP BY market ORDER BY n DESC
+  `).all(from, to);
+  res.json({ month: now.toISOString().slice(0,7), invested, generated, roi, bets_settled: count, markets });
 });
 
 // Health endpoints
