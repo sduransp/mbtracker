@@ -7,8 +7,9 @@ web/dist/
 
 # Data & logs
 logs/
-data/*.sqlite
+data/*.sqlite*
 data/*.db
+exports/
 
 # OS / editor
 .DS_Store
