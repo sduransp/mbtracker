@@ -54,12 +54,31 @@ async function onAddHouse(e){
 function Dashboard(){
   const rows = state.summary?.rows || []
   const exposure = state.summary?.exposure || { total_liability: 0, open_bets: 0 }
+  const houseExposure = state.summary?.houseExposure || []
+  const monthly = state.monthly || { invested:0, generated:0, roi:null, bets_settled:0, markets:[] }
   return h('div', { class:'grid' }, [
     h('div', { class:'card' }, [
       h('h3', {}, 'Exposure'),
       h('div', { class:'metrics' }, [
         h('div', {}, ['Open bets: ', exposure.open_bets||0]),
         h('div', {}, ['Total liability: ', formatEUR(exposure.total_liability||0)])
+      ]),
+      h('div', { class:'panel' }, [
+        h('h4', {}, 'By house'),
+        h('ul', {}, houseExposure.map(hx => h('li', {}, `${rows.find(r=>r.house_id===hx.house_id)?.name||hx.house_id}: ${formatEUR(hx.total_liability||0)} (${hx.open_bets} open)`)))
+      ])
+    ]),
+    h('div', { class:'card' }, [
+      h('h3', {}, 'This month'),
+      h('div', { class:'metrics' }, [
+        h('div', {}, ['Invested: ', formatEUR(monthly.invested||0)]),
+        h('div', {}, ['Generated: ', formatEUR(monthly.generated||0)]),
+        h('div', {}, ['ROI: ', monthly.roi!=null ? (monthly.roi*100).toFixed(1)+'%' : '—']),
+        h('div', {}, ['Settled bets: ', monthly.bets_settled||0])
+      ]),
+      h('div', { class:'panel' }, [
+        h('h4', {}, 'Markets'),
+        h('ul', {}, (monthly.markets||[]).map(m => h('li', {}, `${m.market}: ${m.n} bets · PnL ${formatEUR(m.pnl||0)} · EV ${m.ev!=null?m.ev.toFixed(2):'—'}`)))
       ])
     ]),
     ...rows.map(r => CardHouse(r))
