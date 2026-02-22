@@ -42,6 +42,38 @@ const migrate = () => {
       FOREIGN KEY(house_id) REFERENCES houses(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_entries_house_ts ON entries(house_id, ts);
+
+    -- Bets: track matched betting operations for analytics
+    CREATE TABLE IF NOT EXISTS bets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      house_id INTEGER NOT NULL,
+      exchange_house_id INTEGER, -- optional (e.g., Betfair)
+      event TEXT NOT NULL,
+      league TEXT,
+      market TEXT NOT NULL, -- e.g., O/U 2.5, BTTS
+      selection TEXT NOT NULL,
+      odds_back REAL NOT NULL,
+      stake_back REAL NOT NULL,
+      odds_lay REAL,
+      stake_lay REAL,
+      commission REAL DEFAULT 0, -- exchange commission % (e.g., 0.02)
+      liability REAL, -- computed for lay, optional store
+      is_freebet INTEGER DEFAULT 0,
+      freebet_value REAL,
+      ev_est REAL, -- estimated EV at placement
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','settled','canceled')),
+      result TEXT CHECK(result IN ('win','lose','push')), -- when settled
+      pnl_net REAL, -- final net PnL including commission, when settled
+      ts_placed INTEGER NOT NULL,
+      ts_settled INTEGER,
+      notes TEXT,
+      promo_ref TEXT,
+      FOREIGN KEY(house_id) REFERENCES houses(id) ON DELETE CASCADE,
+      FOREIGN KEY(exchange_house_id) REFERENCES houses(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bets_status ON bets(status);
+    CREATE INDEX IF NOT EXISTS idx_bets_house_placed ON bets(house_id, ts_placed);
+
     CREATE VIEW IF NOT EXISTS v_house_balances AS
       SELECT h.id as house_id, h.name,
              SUM(CASE WHEN kind='deposit' THEN amount WHEN kind='withdrawal' THEN -amount ELSE 0 END) as net_cash,
@@ -51,6 +83,11 @@ const migrate = () => {
       FROM houses h
       LEFT JOIN entries e ON e.house_id = h.id
       GROUP BY h.id, h.name;
+
+    -- Exposure: outstanding liabilities for open bets
+    CREATE VIEW IF NOT EXISTS v_exposure AS
+      SELECT COALESCE(SUM(liability),0) AS total_liability, COUNT(*) AS open_bets
+      FROM bets WHERE status='open';
   `);
 };
 
@@ -68,6 +105,62 @@ if (!count) {
 app.get('/api/houses', (req, res) => {
   const rows = db.prepare('SELECT * FROM houses ORDER BY active DESC, name ASC').all();
   res.json(rows);
+});
+
+// Bets CRUD
+app.get('/api/bets', (req, res) => {
+  const { status, from, to } = req.query;
+  let sql = 'SELECT * FROM bets WHERE 1=1';
+  const params = [];
+  if (status) { sql += ' AND status = ?'; params.push(status); }
+  if (from) { sql += ' AND ts_placed >= ?'; params.push(Number(from)); }
+  if (to) { sql += ' AND ts_placed <= ?'; params.push(Number(to)); }
+  sql += ' ORDER BY ts_placed DESC LIMIT 1000';
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
+});
+
+app.post('/api/bets', (req, res) => {
+  const b = req.body;
+  try {
+    const info = db.prepare(`
+      INSERT INTO bets(house_id, exchange_house_id, event, league, market, selection,
+        odds_back, stake_back, odds_lay, stake_lay, commission, liability,
+        is_freebet, freebet_value, ev_est, status, ts_placed, notes, promo_ref)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      b.house_id, b.exchange_house_id || null, b.event, b.league || null, b.market, b.selection,
+      b.odds_back, b.stake_back, b.odds_lay || null, b.stake_lay || null, b.commission || 0,
+      b.liability || null, b.is_freebet?1:0, b.freebet_value || null, b.ev_est || null,
+      b.status || 'open', b.ts_placed || Date.now(), b.notes || null, b.promo_ref || null
+    );
+    res.status(201).json({ id: info.lastInsertRowid });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/bets/:id/settle', (req, res) => {
+  const { id } = req.params;
+  const { result, pnl_net, ts_settled = Date.now() } = req.body;
+  try {
+    const info = db.prepare(`
+      UPDATE bets SET status='settled', result=?, pnl_net=?, ts_settled=? WHERE id=?
+    `).run(result, pnl_net, ts_settled, id);
+    res.json({ changes: info.changes });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/bets/:id/cancel', (req, res) => {
+  const { id } = req.params;
+  try {
+    const info = db.prepare(`UPDATE bets SET status='canceled' WHERE id=?`).run(id);
+    res.json({ changes: info.changes });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // POST /api/houses — create house
@@ -134,7 +227,29 @@ app.get('/api/analytics/summary', (req, res) => {
     net_fees: acc.net_fees + (r.net_fees || 0),
     gross_flow: acc.gross_flow + (r.gross_flow || 0)
   }), { net_cash:0, net_pnl:0, net_fees:0, gross_flow:0 });
-  res.json({ rows, total });
+  const exposure = db.prepare('SELECT * FROM v_exposure').get();
+  res.json({ rows, total, exposure });
+});
+
+// Monthly KPI: invested (deposits - withdrawals), generated (net PnL), ROI
+app.get('/api/analytics/monthly', (req, res) => {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const to = new Date(now.getFullYear(), now.getMonth()+1, 1).getTime()-1;
+  const cash = db.prepare(`
+    SELECT
+      SUM(CASE WHEN kind='deposit' THEN amount WHEN kind='withdrawal' THEN -amount ELSE 0 END) AS invested
+    FROM entries WHERE ts BETWEEN ? AND ?
+  `).get(from, to);
+  const pnl = db.prepare(`
+    SELECT SUM(CASE WHEN result='win' THEN pnl_net WHEN result='lose' THEN pnl_net ELSE 0 END) AS generated
+    FROM bets WHERE status='settled' AND ts_settled BETWEEN ? AND ?
+  `).get(from, to);
+  const invested = cash.invested || 0;
+  const generated = pnl.generated || 0;
+  const roi = invested ? (generated / invested) : null;
+  const count = db.prepare(`SELECT COUNT(*) AS n FROM bets WHERE status='settled' AND ts_settled BETWEEN ? AND ?`).get(from, to).n;
+  res.json({ month: now.toISOString().slice(0,7), invested, generated, roi, bets_settled: count });
 });
 
 // Health endpoints
