@@ -138,4 +138,4 @@ app.get(/^(?!\/api\/).*/, (req,res)=>{
 });
 
 const port = process.env.PORT || 5174;
-app.listen(port, () => console.log(`MBTracker server listening on http://127.0.0.1:${port}`));
+app.listen(port, '127.0.0.1', () => console.log(`MBTracker server listening on http://127.0.0.1:${port}`));
