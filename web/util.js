@@ -1,5 +1,5 @@
 export function formatEUR(n){
-  return new Intl.NumberFormat('es-ES', { style:'currency', currency:'EUR' }).format(n||0)
+  return new Intl.NumberFormat('en-GB', { style:'currency', currency:'EUR' }).format(n||0)
 }
 export function since(ts){
   const d = Date.now()-ts
