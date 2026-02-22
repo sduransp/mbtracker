@@ -10,7 +10,8 @@ A lightweight local web app to track matched betting cash flows and P&L across b
 
 - Houses registry (e.g., Retabet, Betfair) with metadata and active flag
 - Journal of entries: deposit, withdrawal, profit, loss, bonus, fee
-- Analytics views: balances per house, 30-day aggregation, and overall summary
+- Analytics views: balances per house, 30-day aggregation, exposure, and overall summary
+- Monthly KPIs endpoint: invested (deposits - withdrawals), generated (net PnL), ROI
 - Health endpoints (`/api/health`, `/health`) and static web serving
 
 ## Getting Started
@@ -54,7 +55,8 @@ Base URL: `http://127.0.0.1:5174`
 - `GET /api/entries?house_id=&from=&to=` → list entries with filters
 - `POST /api/entries` → create entry `{ house_id, kind, amount, currency?, ts?, ref?, notes? }`
 - `GET /api/analytics/house/:id` → per-house balance + last 30-day totals
-- `GET /api/analytics/summary` → table `v_house_balances` + totals
+- `GET /api/analytics/summary` → table `v_house_balances` + totals + exposure
+- `GET /api/analytics/monthly` → { month, invested, generated, roi, bets_settled }
 - `GET /api/health` → JSON health
 - `GET /health` → plain text health
 
