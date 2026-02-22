@@ -16,6 +16,7 @@
     "dev:web": "cd web && vite",
     "build": "cd web && vite build",
     "start": "NODE_ENV=production node server/index.js",
+    "smoke": "node scripts/smoke-test.js",
     "export:csv": "node scripts/export-csv.js"
   },
   "keywords": ["matched-betting", "sqlite", "express", "vite", "pnl", "tracking"],
