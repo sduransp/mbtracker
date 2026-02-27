@@ -33,6 +33,10 @@ npm run dev
 - Server: http://127.0.0.1:5174
 - Web (Vite dev): http://127.0.0.1:5173
 
+Notes:
+- The API has no auth; it binds to 127.0.0.1 by default. Do not expose publicly without a reverse proxy, TLS, and access controls.
+- Environment variables: see `.env.example` (PORT, NODE_ENV). Create your own `.env` as needed.
+
 ### Build frontend
 ```bash
 npm run build
@@ -44,6 +48,10 @@ Builds static assets to `web/dist/`.
 npm start
 ```
 Serves the built frontend from `web/dist/` and the API under `/api/*`.
+
+Hardening tips:
+- Use a systemd service (see below) and bind to 127.0.0.1.
+- If remote access is required, put a reverse proxy in front and restrict by IP or auth.
 
 ## API Overview
 

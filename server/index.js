@@ -106,13 +106,21 @@ if (!count) {
 }
 
 // API routes
-// GET /api/houses — list houses
+/**
+ * GET /api/houses — list houses
+ * Response: Array<House>
+ */
 app.get('/api/houses', (req, res) => {
   const rows = db.prepare('SELECT * FROM houses ORDER BY active DESC, name ASC').all();
   res.json(rows);
 });
 
 // Bets CRUD
+/**
+ * GET /api/bets
+ * Query params: { status?: 'open'|'settled'|'canceled', from?: number(ms), to?: number(ms) }
+ * Response: Array<Bet>
+ */
 app.get('/api/bets', (req, res) => {
   const { status, from, to } = req.query;
   let sql = 'SELECT * FROM bets WHERE 1=1';
@@ -125,6 +133,11 @@ app.get('/api/bets', (req, res) => {
   res.json(rows);
 });
 
+/**
+ * POST /api/bets — create bet
+ * Body: Bet fields (see schema); numeric fields should be numbers.
+ * Response: { id }
+ */
 app.post('/api/bets', (req, res) => {
   const b = req.body;
   try {
@@ -145,6 +158,11 @@ app.post('/api/bets', (req, res) => {
   }
 });
 
+/**
+ * PUT /api/bets/:id/settle — settle a bet
+ * Body: { result: 'win'|'lose'|'push', pnl_net: number, ts_settled?: number }
+ * Response: { changes }
+ */
 app.put('/api/bets/:id/settle', (req, res) => {
   const { id } = req.params;
   const { result, pnl_net, ts_settled = Date.now() } = req.body;
@@ -158,6 +176,10 @@ app.put('/api/bets/:id/settle', (req, res) => {
   }
 });
 
+/**
+ * PUT /api/bets/:id/cancel — cancel a bet
+ * Response: { changes }
+ */
 app.put('/api/bets/:id/cancel', (req, res) => {
   const { id } = req.params;
   try {
@@ -168,7 +190,11 @@ app.put('/api/bets/:id/cancel', (req, res) => {
   }
 });
 
-// POST /api/houses — create house
+/**
+ * POST /api/houses — create house
+ * Body: { name: string, country?: string, notes?: string, active?: 0|1 }
+ * Response: { id }
+ */
 app.post('/api/houses', (req, res) => {
   const { name, country, notes, active = 1 } = req.body;
   try {
@@ -179,7 +205,11 @@ app.post('/api/houses', (req, res) => {
   }
 });
 
-// PUT /api/houses/:id — update house fields
+/**
+ * PUT /api/houses/:id — update house fields
+ * Body: partial House fields
+ * Response: { changes }
+ */
 app.put('/api/houses/:id', (req, res) => {
   const { id } = req.params;
   const { name, country, notes, active } = req.body;
@@ -191,7 +221,11 @@ app.put('/api/houses/:id', (req, res) => {
   }
 });
 
-// GET /api/entries — list entries (filters: house_id, from, to)
+/**
+ * GET /api/entries — list entries
+ * Query params: { house_id?: number, from?: number, to?: number }
+ * Response: Array<Entry>
+ */
 app.get('/api/entries', (req, res) => {
   const { house_id, from, to } = req.query;
   let sql = 'SELECT * FROM entries WHERE 1=1';
@@ -204,7 +238,11 @@ app.get('/api/entries', (req, res) => {
   res.json(rows);
 });
 
-// POST /api/entries — create entry
+/**
+ * POST /api/entries — create entry
+ * Body: { house_id, kind, amount, currency?, ts?, ref?, notes? }
+ * Response: { id }
+ */
 app.post('/api/entries', (req, res) => {
   const { house_id, kind, amount, currency = 'EUR', ts = Date.now(), ref, notes } = req.body;
   try {
@@ -215,7 +253,10 @@ app.post('/api/entries', (req, res) => {
   }
 });
 
-// GET /api/analytics/house/:id — per-house balance + 30-day totals
+/**
+ * GET /api/analytics/house/:id — per-house balance + 30-day totals
+ * Response: { balance, last30 }
+ */
 app.get('/api/analytics/house/:id', (req, res) => {
   const { id } = req.params;
   const bal = db.prepare('SELECT * FROM v_house_balances WHERE house_id = ?').get(id);
@@ -223,7 +264,10 @@ app.get('/api/analytics/house/:id', (req, res) => {
   res.json({ balance: bal, last30 });
 });
 
-// GET /api/analytics/summary — balances for all houses + totals
+/**
+ * GET /api/analytics/summary — balances for all houses + totals
+ * Response: { rows, total, exposure, houseExposure }
+ */
 app.get('/api/analytics/summary', (req, res) => {
   const rows = db.prepare('SELECT * FROM v_house_balances').all();
   const total = rows.reduce((acc, r) => ({
@@ -233,11 +277,20 @@ app.get('/api/analytics/summary', (req, res) => {
     gross_flow: acc.gross_flow + (r.gross_flow || 0)
   }), { net_cash:0, net_pnl:0, net_fees:0, gross_flow:0 });
   const exposure = db.prepare('SELECT * FROM v_exposure').get();
-  const houseExposure = db.prepare('SELECT * FROM v_house_exposure').all();
+  const houseExposure = db.prepare(`
+    SELECT COALESCE(exchange_house_id, house_id) AS house_id,
+           COALESCE(SUM(liability),0) AS total_liability,
+           COUNT(*) AS open_bets
+    FROM bets WHERE status='open'
+    GROUP BY COALESCE(exchange_house_id, house_id)
+  `).all();
   res.json({ rows, total, exposure, houseExposure });
 });
 
-// Monthly KPI: invested (deposits - withdrawals), generated (net PnL), ROI
+/**
+ * GET /api/analytics/monthly — monthly KPIs
+ * Response: { month, invested, generated, roi, bets_settled, markets }
+ */
 app.get('/api/analytics/monthly', (req, res) => {
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
