@@ -1,3 +1,5 @@
+// MBTracker frontend entry point.
+// Minimal vanilla JS UI that calls the local API and renders panels.
 import { h, render } from './mini.js'
 import { api } from './net.js'
 import { formatEUR, since } from './util.js'
@@ -10,6 +12,7 @@ const state = {
   tab: 'dashboard',
 }
 
+// Load initial data: houses + summary.
 async function load() {
   try {
     state.houses = await api('/api/houses')
@@ -21,6 +24,7 @@ async function load() {
   rerender()
 }
 
+// Load monthly KPIs.
 async function loadMonthly(){
   try {
     state.monthly = await api('/api/analytics/monthly')
